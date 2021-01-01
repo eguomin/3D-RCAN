@@ -54,6 +54,9 @@ else:
 
 model_path = get_model_path(args.model_dir)
 print('Loading model from', model_path)
+# model = load_model(str(model_path), input_shape=None)
+# input_shape = (64,256,256)  # Min: de-aberration
+input_shape = (128,256,128)  # Min: deconvolution
 model = load_model(str(model_path), input_shape=None)
 
 overlap_shape = [
@@ -66,7 +69,8 @@ for raw_file, gt_file in data:
     print('Applying model')
     restored = apply(model, raw, overlap_shape=overlap_shape, verbose=True)
 
-    result = [raw, restored]
+    # result = [raw, restored]
+    result = restored # Min: save only DL recovered image
 
     if gt_file is not None:
         print('Loading ground truth image from', gt_file)
@@ -83,7 +87,8 @@ for raw_file, gt_file in data:
     if args.bpp == 8:
         result = np.clip(255 * result, 0, 255).astype('uint8')
     elif args.bpp == 16:
-        result = np.clip(65535 * result, 0, 65535).astype('uint16')
+        # result = np.clip(65535 * result, 0, 65535).astype('uint16')
+        result = np.clip(2000 * result, 0, 65535).astype('uint16') # Min: modify normalization
 
     if output_path.is_dir():
         output_file = output_path / raw_file.name
@@ -91,4 +96,10 @@ for raw_file, gt_file in data:
         output_file = output_path
 
     print('Saving output image to', output_file)
-    tifffile.imwrite(str(output_file), result, imagej=True)
+    # tifffile.imwrite(str(output_file), result, imagej=True)
+    tifffile.imwrite(str(output_file), result, imagej=False) # Min: imagej=True --> imagej=False
+
+     # # Min: re-define TIFF formate - - does not work
+    # imwrite('temp.tif', volume, imagej=True, resolution=(1./2.6755, 1./2.6755),
+    # ...         metadata={'spacing': 3.947368, 'unit': 'um', 'axes': 'ZYX'})
+    # tifffile.imwrite(str(output_file), result, imagej=True, metadata={'axes': 'ZYX'})
