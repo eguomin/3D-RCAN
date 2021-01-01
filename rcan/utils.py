@@ -94,7 +94,7 @@ def load_model(filename, input_shape=None):
 
     with h5py.File(filename, mode='r') as f:
         model_config = f.attrs.get('model_config')
-        model_config = json.loads(model_config.decode('utf-8'))
+        model_config = json.loads(model_config)
 
         # overwrite model's input shape
         if input_shape is not None:
