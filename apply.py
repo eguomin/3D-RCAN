@@ -16,7 +16,9 @@ parser.add_argument('-i', '--input', type=str, required=True)
 parser.add_argument('-o', '--output', type=str, required=True)
 parser.add_argument('-g', '--ground_truth', type=str)
 parser.add_argument('-b', '--bpp', type=int, choices=[8, 16, 32], default=32)
+parser.add_argument('-p', '--psize', nargs=3, type=int)
 args = parser.parse_args()
+print(args.psize)
 
 input_path = pathlib.Path(args.input)
 output_path = pathlib.Path(args.output)
@@ -56,8 +58,13 @@ model_path = get_model_path(args.model_dir)
 print('Loading model from', model_path)
 # model = load_model(str(model_path), input_shape=None)
 # input_shape = (64,256,256)  # Min: de-aberration
-input_shape = (128,256,128)  # Min: deconvolution
-model = load_model(str(model_path), input_shape=None)
+# input_shape = (128,256,128)  # Min: deconvolution
+if args.psize is None:
+    input_shape = None
+else:
+    input_shape = args.psize
+
+model = load_model(str(model_path), input_shape)
 
 overlap_shape = [
     max(1, x // 8) if x > 2 else 0 for x in model.input.shape.as_list()[1:-1]]
