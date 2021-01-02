@@ -18,7 +18,6 @@ parser.add_argument('-g', '--ground_truth', type=str)
 parser.add_argument('-b', '--bpp', type=int, choices=[8, 16, 32], default=32)
 parser.add_argument('-p', '--psize', nargs=3, type=int)
 args = parser.parse_args()
-print(args.psize)
 
 input_path = pathlib.Path(args.input)
 output_path = pathlib.Path(args.output)
