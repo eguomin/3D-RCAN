@@ -10,13 +10,20 @@ import numpy as np
 import pathlib
 import tifffile
 
+
+def tuple_of_ints(string):
+    return tuple(int(s) for s in string.split(','))
+
+
 parser = argparse.ArgumentParser()
 parser.add_argument('-m', '--model_dir', type=str, required=True)
 parser.add_argument('-i', '--input', type=str, required=True)
 parser.add_argument('-o', '--output', type=str, required=True)
 parser.add_argument('-g', '--ground_truth', type=str)
 parser.add_argument('-b', '--bpp', type=int, choices=[8, 16, 32], default=32)
-parser.add_argument('-p', '--psize', nargs=3, type=int)
+parser.add_argument('-B', '--block_shape', type=tuple_of_ints, default=None)
+parser.add_argument(
+    '-O', '--block_overlap_shape', type=tuple_of_ints, default=None)
 args = parser.parse_args()
 
 input_path = pathlib.Path(args.input)
@@ -55,18 +62,14 @@ else:
 
 model_path = get_model_path(args.model_dir)
 print('Loading model from', model_path)
-# model = load_model(str(model_path), input_shape=None)
-# input_shape = (64,256,256)  # Min: de-aberration
-# input_shape = (128,256,128)  # Min: deconvolution
-if args.psize is None:
-    input_shape = None
+model = load_model(str(model_path), input_shape=args.block_shape)
+
+if args.block_overlap_shape is None:
+    overlap_shape = [
+        max(1, x // 8) if x > 2 else 0
+        for x in model.input.shape.as_list()[1:-1]]
 else:
-    input_shape = args.psize
-
-model = load_model(str(model_path), input_shape)
-
-overlap_shape = [
-    max(1, x // 8) if x > 2 else 0 for x in model.input.shape.as_list()[1:-1]]
+    overlap_shape = args.block_overlap_shape
 
 for raw_file, gt_file in data:
     print('Loading raw image from', raw_file)
@@ -104,8 +107,3 @@ for raw_file, gt_file in data:
     print('Saving output image to', output_file)
     # tifffile.imwrite(str(output_file), result, imagej=True)
     tifffile.imwrite(str(output_file), result, imagej=False) # Min: imagej=True --> imagej=False
-
-     # # Min: re-define TIFF formate - - does not work
-    # imwrite('temp.tif', volume, imagej=True, resolution=(1./2.6755, 1./2.6755),
-    # ...         metadata={'spacing': 3.947368, 'unit': 'um', 'axes': 'ZYX'})
-    # tifffile.imwrite(str(output_file), result, imagej=True, metadata={'axes': 'ZYX'})
