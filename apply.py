@@ -74,7 +74,7 @@ else:
     overlap_shape = args.block_overlap_shape
 
 if args.scale_value is None:
-    sValue = 1000 # previously sValue = 2000
+    sValue = 2000
 else:
     sValue = args.scale_value
 
