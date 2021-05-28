@@ -24,6 +24,8 @@ parser.add_argument('-b', '--bpp', type=int, choices=[8, 16, 32], default=32)
 parser.add_argument('-B', '--block_shape', type=tuple_of_ints, default=None)
 parser.add_argument(
     '-O', '--block_overlap_shape', type=tuple_of_ints, default=None)
+parser.add_argument(
+    '-S', '--scale_value', type=float, default=None)
 args = parser.parse_args()
 
 input_path = pathlib.Path(args.input)
@@ -71,6 +73,11 @@ if args.block_overlap_shape is None:
 else:
     overlap_shape = args.block_overlap_shape
 
+if args.scale_value is None:
+    sValue = 2000
+else:
+    sValue = args.scale_value
+
 for raw_file, gt_file in data:
     print('Loading raw image from', raw_file)
     raw = normalize(tifffile.imread(str(raw_file)))
@@ -89,15 +96,21 @@ for raw_file, gt_file in data:
         else:
             print('Ground truth image discarded due to image shape mismatch')
 
+
+    # 20210219 update: remove negative values --> update cancelled
+    # old version: with negative values and sValue = 2000
+    # minValue = np.amin(result)
+    # result = (result - minValue);
+    #
+
     result = np.stack(result)
     if result.ndim == 4:
         result = np.transpose(result, (1, 0, 2, 3))
 
     if args.bpp == 8:
-        result = np.clip(255 * result, 0, 255).astype('uint8')
+        result = np.clip(sValue * result, 0, 255).astype('uint8')
     elif args.bpp == 16:
-        # result = np.clip(65535 * result, 0, 65535).astype('uint16')
-        result = np.clip(2000 * result, 0, 65535).astype('uint16') # Min: modify normalization
+        result = np.clip(sValue * result, 0, 65535).astype('uint16') # Min: modify normalization
 
     if output_path.is_dir():
         output_file = output_path / raw_file.name
