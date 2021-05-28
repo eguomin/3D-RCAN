@@ -33,9 +33,16 @@ Tested Environment:
     - NVIDIA Tesla P100 16 GB
     - CUDA 10.0 and cuDNN 7.6.5
 
-## Sample dataset
+## Dataset
 
-[Sample ER dataset and demo model](https://www.dropbox.com/sh/hieldept1x476dw/AAC0pY3FrwdZBctvFF0Fx0L3a?dl=0): This link contains a dataset, a demo model trained on that dataset, and one expected output (32-bit)
+1. [Sample ER dataset and demo model](https://www.dropbox.com/sh/hieldept1x476dw/AAC0pY3FrwdZBctvFF0Fx0L3a?dl=0): This link contains a dataset, a demo model trained on that dataset, and one expected output (32-bit)
+
+2. [Data for 3D RCAN Paper](https://zenodo.org/record/4624364#.YF4lBa9Kgal): This data release contains all training and testing data for the 3D RCAN paper. Data size: After upzip, the total size is 521 GB. Please leave enough space in the disk before unzip.Data are organized in four categories:
+      - **Denoising**: It contains all training and testing data for Actin, ER, Golgi, lysosome, Microtubule, Tomm20 Mitochondria and Matrix protein Mitochondria.
+      - **Phantom Spheres**: It contains training and testing data for synthetic blurred phantom sphere(2, 3 and 4 times). The ground truth is the synthetic phantom sphere without blurring.
+      - **Confocal to STED**: It contains training and testing data for three different structure shown in the paper (Microtubule, nuclear pore complex and DNA). It also contains live cell data that nucleus stained by SiR for confocal to STED image modality transfer learning. Raw and GT data in the training and testing folder refer to confocal and STED images.
+      - **Expansion Microscopy**: It contains training and testing data for two different structure shown in the paper. (Microtubule and Tomm20 stained Mitochondria). Raw and GT data in the training and testing folder refer to Synthetic raw and deconvolved expansion microscopy iSIM images.
+      - **live cell test data Microscopy**: It contains:(1).U2OS cells transfected with matrix protein Mitochondria and Lamp1 labeled lyososome for denoising; (2). Jukat T cells transfected with EMTB-GFP for expansion microscopy.
 
 ## Dependencies Installation
 
@@ -236,7 +243,7 @@ Following optional variables can be also set in the JSON file (if not set, defau
   - Default: 0.25, Range: >0.0
 
     ```javascript
-    "channel_reduction": 0.3
+    "intensity_threshold": 0.3
     ```
 
 - `area_ratio_threshold` (number)
@@ -421,6 +428,48 @@ python apply.py -m model_dir -i input_dir -g ground_truth_dir -o output_dir
             -O 4,16,16
             ```
 
+-  `--normalize_output_range_between_zero_and_one`
+
+  - To normalize the output intensity range to [0, 1]
+
+    - Minimum intensity is mapped to 0
+
+    - Maximum intensity is mapped to 1
+
+      ```
+      --normalize_output_range_between_zero_and_one
+      ```
+
+  - Combine with --bpp, for example to normalized to 16-bit  [0, 65535] 
+
+    - Minimum intensity is mapped to 0
+    - Maximum intensity is mapped to 65535
+
+    ```
+    -b 16 --normalize_output_range_between_zero_and_one
+    ```
+
+- `--rescale`
+
+  - To perform affine rescaling to minimize the mean squared error between restored and ground truth images
+  - This flag is especially useful if you want to conduct the same image quality analysis as CARE
+
+  ```
+  --rescale
+  ```
+
+- `-f` or `--output_tiff_format`(str)
+
+  - To set output format
+
+    1. “imagej” -  to save as ImageJ Hyperstack (XYCZT) [default]
+
+    2. “ome” - to save as OME-TIFF (XYZCT)
+
+       ```
+       -f ome
+       ```
+
 ## References
 
 <a id="1">[1]</a>
@@ -431,6 +480,6 @@ ECCV 2018
 
 ## License
 
-Copyright © 2020 [DRVision Technologies LLC.](https://www.drvtechnologies.com/)
+Copyright © 2021 [SVision Technologies LLC.](https://www.aivia-software.com/)
 
 Released under Creative Commons Attribution-NonCommercial 4.0 International Public License ([CC BY-NC 4.0](https://creativecommons.org/licenses/by-nc/4.0/))

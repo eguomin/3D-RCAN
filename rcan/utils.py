@@ -1,18 +1,67 @@
-# Copyright 2020 DRVision Technologies LLC.
+# Copyright 2021 SVision Technologies LLC.
 # Creative Commons Attribution-NonCommercial 4.0 International Public License
 # (CC BY-NC 4.0) https://creativecommons.org/licenses/by-nc/4.0/
 
 import fractions
+import h5py
 import itertools
+import json
+import keras
 import numexpr
 import numpy as np
 import pathlib
 import re
+import tifffile
 import tqdm
 import tqdm.utils
-import json
-import h5py
-import keras
+
+from tensorflow.python.client.device_lib import list_local_devices
+
+
+def get_gpu_count():
+    '''Returns the number of available GPUs.'''
+    return len([x for x in list_local_devices() if x.device_type == 'GPU'])
+
+
+def is_multi_gpu_model(model):
+    '''Checks if the model supports multi-GPU data parallelism.'''
+    return hasattr(model, 'is_multi_gpu_model') and model.is_multi_gpu_model
+
+
+def convert_to_multi_gpu_model(model, gpus=None):
+    '''
+    Converts a model into a multi-GPU version if possible.
+
+    Parameters
+    ----------
+    model: keras.Model
+        Model to be converted.
+    gpus: int or None
+        Number of GPUs used to create model replicas. If None, all GPUs
+        available on the device will be used.
+
+    Returns
+    -------
+    keras.Model
+        Multi-GPU model.
+    '''
+
+    gpus = gpus or get_gpu_count()
+
+    if gpus <= 1 or is_multi_gpu_model(model):
+        return model
+
+    multi_gpu_model = keras.utils.multi_gpu_model(
+        model, gpus=gpus, cpu_relocation=True)
+
+    # copy weights
+    multi_gpu_model.layers[
+        -(len(multi_gpu_model.outputs) + 1)].set_weights(model.get_weights())
+
+    setattr(multi_gpu_model, 'is_multi_gpu_model', True)
+    setattr(multi_gpu_model, 'gpus', gpus)
+
+    return multi_gpu_model
 
 
 def normalize(image, p_min=2, p_max=99.9, dtype='float32'):
@@ -31,12 +80,32 @@ def normalize(image, p_min=2, p_max=99.9, dtype='float32'):
         '(image - low) / (high - low + 1e-6)').astype(dtype)
 
 
+def rescale(restored, gt):
+    '''Affine rescaling to minimize the MSE to the GT'''
+    cov = np.cov(restored.flatten(), gt.flatten())
+    a = cov[0, 1] / cov[0, 0]
+    b = gt.mean() - a * restored.mean()
+    return a * restored + b
+
+
 def staircase_exponential_decay(n):
     '''
     Returns a scheduler function to drop the learning rate by half
     every `n` epochs.
     '''
     return lambda epoch, lr: lr / 2 if epoch != 0 and epoch % n == 0 else lr
+
+
+def save_model(filename, model, weights_only=False):
+    if is_multi_gpu_model(model):
+        m = model.layers[-(len(model.outputs) + 1)]
+    else:
+        m = model
+
+    if weights_only:
+        m.save_weights(filename, overwrite=True)
+    else:
+        m.save(filename, overwrite=True)
 
 
 def get_model_path(directory, model_type='best'):
@@ -112,7 +181,7 @@ def load_model(filename, input_shape=None):
         return model
 
 
-def apply(model, data, batch_size=1, overlap_shape=None, verbose=False):
+def apply(model, data, overlap_shape=None, verbose=False):
     '''
     Applies a model to an input image. The input image stack is split into
     sub-blocks with model's input size, then the model is applied block by
@@ -125,8 +194,6 @@ def apply(model, data, batch_size=1, overlap_shape=None, verbose=False):
         Keras model.
     data: array_like or list of array_like
         Input data. Either an image or a list of images.
-    batch_size: int
-        Batch size.
     overlap_shape: tuple of int or None
         Overlap size between sub-blocks in each dimension. If not specified,
         a default size ((32, 32) for 2D and (2, 32, 32) for 3D) is used.
@@ -197,6 +264,7 @@ def apply(model, data, batch_size=1, overlap_shape=None, verbose=False):
         'linear_ramp'
     )[(slice(1, -1),) * image_dim]
 
+    batch_size = model.gpus if is_multi_gpu_model(model) else 1
     batch = np.zeros(
         (batch_size, *model_input_image_shape, num_input_channels),
         dtype=np.float32)
@@ -276,3 +344,60 @@ def apply(model, data, batch_size=1, overlap_shape=None, verbose=False):
         result.append(applied)
 
     return result if input_is_list else result[0]
+
+
+def save_imagej_hyperstack(filename, image):
+    assert image.ndim in [3, 4]
+    if image.ndim == 4:
+        image = np.transpose(image, (1, 0, 2, 3))
+
+    tifffile.imwrite(str(filename), image, imagej=True)
+
+
+def save_ome_tiff(filename, image):
+    assert image.ndim in [3, 4]
+    image = np.expand_dims(image, (1, 2) if image.ndim == 3 else 1)
+    c, t, z, y, x = image.shape
+
+    pixel_type = {
+        np.dtype('uint8'): 'Uint8',
+        np.dtype('uint16'): 'Uint16',
+        np.dtype('float32'): 'Float'
+    }[image.dtype]
+
+    channel_names = ['Raw', 'Restored', 'Ground Truth']
+    lsid_base = 'ome.drvtechnologies.com:'
+
+    channel_info = ''
+    for i, name in enumerate(channel_names[:c]):
+        channel_info += f'''\
+    <ChannelInfo Name="{name}" ID="{lsid_base}ChannelInfo:{i + 3}">
+      <ChannelComponent Index="{i}" Pixels="{lsid_base}Pixels:2"/>
+    </ChannelInfo>
+'''
+    description = f'''\
+<OME xmlns="http://www.openmicroscopy.org/XMLschemas/OME/FC/ome.xsd">
+  <Image Name="Unnamed [{pixel_type} {x}x{y}x{z}x{t} Channels]"
+         ID="{lsid_base}Image:1">
+{channel_info}\
+    <Pixels DimensionOrder="XYZTC" PixelType="{pixel_type}"
+            SizeX="{x}" SizeY="{y}" SizeZ="{z}" SizeT="{t}" SizeC="{c}"
+            BigEndian="false" ID="{lsid_base}Pixels:2">
+      <TiffData IFD="0" NumPlanes="{z * c * t}"/>
+    </Pixels>
+  </Image>
+</OME>
+'''
+
+    tifffile.imwrite(
+        filename,
+        data=image,
+        description=description,
+        metadata=None)
+
+
+def save_tiff(filename, image, format):
+    {
+        'imagej': save_imagej_hyperstack,
+        'ome': save_ome_tiff
+    }[format](filename, image)

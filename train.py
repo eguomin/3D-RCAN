@@ -1,15 +1,19 @@
-# Copyright 2020 DRVision Technologies LLC.
+# Copyright 2021 SVision Technologies LLC.
 # Creative Commons Attribution-NonCommercial 4.0 International Public License
 # (CC BY-NC 4.0) https://creativecommons.org/licenses/by-nc/4.0/
 
+from rcan.callbacks import ModelCheckpoint, TqdmCallback
 from rcan.data_generator import DataGenerator
 from rcan.losses import mae, mse
 from rcan.metrics import psnr, ssim
 from rcan.model import build_rcan
-from rcan.utils import normalize, staircase_exponential_decay
+from rcan.utils import (
+    convert_to_multi_gpu_model,
+    get_gpu_count,
+    normalize,
+    staircase_exponential_decay)
 
 import argparse
-import functools
 import itertools
 import json
 import jsonschema
@@ -17,11 +21,6 @@ import keras
 import numpy as np
 import pathlib
 import tifffile
-
-from tqdm import tqdm as std_tqdm
-from tqdm.keras import TqdmCallback
-from tqdm.utils import IS_WIN
-tqdm = functools.partial(std_tqdm, dynamic_ncols=True, ascii=IS_WIN)
 
 
 def load_data(config, data_type):
@@ -177,6 +176,9 @@ model = build_rcan(
     num_residual_groups=config['num_residual_groups'],
     channel_reduction=config['channel_reduction'])
 
+gpus = get_gpu_count()
+model = convert_to_multi_gpu_model(model, gpus)
+
 model.compile(
     optimizer=keras.optimizers.Adam(lr=config['initial_learning_rate']),
     loss={'mae': mae, 'mse': mse}[config['loss']],
@@ -184,7 +186,7 @@ model.compile(
 
 data_gen = DataGenerator(
     input_shape,
-    1,
+    gpus,
     transform_function=(
         'rotate_and_flip' if config['data_augmentation'] else None),
     intensity_threshold=config['intensity_threshold'],
@@ -198,6 +200,9 @@ if validation_data is not None:
 else:
     checkpoint_filepath = 'weights_{epoch:03d}_{loss:.8f}.hdf5'
 
+steps_per_epoch = config['steps_per_epoch'] // gpus
+validation_steps = None if validation_data is None else steps_per_epoch
+
 output_dir = pathlib.Path(args.output_dir)
 output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -205,19 +210,19 @@ print('Training RCAN model')
 model.fit_generator(
     training_data,
     epochs=config['epochs'],
-    steps_per_epoch=config['steps_per_epoch'],
+    steps_per_epoch=steps_per_epoch,
     validation_data=validation_data,
-    validation_steps=config['steps_per_epoch'],
+    validation_steps=validation_steps,
     verbose=0,
     callbacks=[
         keras.callbacks.LearningRateScheduler(
             staircase_exponential_decay(config['epochs'] // 4)),
-        keras.callbacks.ModelCheckpoint(
-            str(output_dir / checkpoint_filepath),
-            monitor='loss' if validation_data is None else 'val_loss',
-            save_best_only=True),
         keras.callbacks.TensorBoard(
             log_dir=str(output_dir),
             write_graph=False),
-        TqdmCallback(tqdm_class=tqdm)
+        ModelCheckpoint(
+            str(output_dir / checkpoint_filepath),
+            monitor='loss' if validation_data is None else 'val_loss',
+            save_best_only=True),
+        TqdmCallback()
     ])
